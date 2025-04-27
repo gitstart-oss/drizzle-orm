@@ -1961,6 +1961,27 @@ const defaultForColumn = (column: any, internals: PgKitInternals, tableName: str
 	const columnDefaultAsString: string = column.column_default.toString();
 
 	if (isArray) {
+		// Handle ARRAY[] syntax (e.g., ARRAY[])
+		if (columnDefaultAsString.startsWith('ARRAY[')) {
+			const closingBracketIndex = columnDefaultAsString.indexOf(']');
+			if (closingBracketIndex !== -1) {
+				const arrayContent = columnDefaultAsString.substring(6, closingBracketIndex).trim();
+				
+				// For empty ARRAY[]
+				if (arrayContent === '') {
+					return "'{}'";
+				}
+				
+				// For non-empty ARRAY[], convert to curly brace syntax
+				columnDefaultAsString = `{${arrayContent}}`;
+			}
+		}
+
+		// Handle empty array case
+		if (columnDefaultAsString === '{}') {
+			return "'{}'";
+		}
+
 		return `'{${
 			columnDefaultAsString
 				.slice(2, -2)
@@ -1975,7 +1996,17 @@ const defaultForColumn = (column: any, internals: PgKitInternals, tableName: str
 					} else if (column.data_type.slice(0, -2) === 'boolean') {
 						return value === 't' ? 'true' : 'false';
 					} else if (['json', 'jsonb'].includes(column.data_type.slice(0, -2))) {
-						return JSON.stringify(JSON.stringify(JSON.parse(JSON.parse(value)), null, 0));
+						try {
+							// Handle empty string case for json/jsonb arrays
+							if (value === '') {
+								return '';
+							}
+							// Double parsing is needed because PostgreSQL stores JSON values as escaped strings
+							return JSON.stringify(JSON.stringify(JSON.parse(JSON.parse(value)), null, 0));
+						} catch (e) {
+							// If parsing fails, return the value as is with proper escaping
+							return `\"${value.replace(/"/g, '\\"')}\"`;
+						}
 					} else {
 						return `\"${value}\"`;
 					}
